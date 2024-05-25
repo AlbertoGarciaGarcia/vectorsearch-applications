@@ -1,9 +1,11 @@
 import sys
 import os
+
 abs_path = os.path.abspath("../")
 sys.path.append(abs_path)
 
 from dotenv import load_dotenv, find_dotenv
+
 _ = load_dotenv(find_dotenv(), override=True)
 
 import uuid
@@ -20,14 +22,14 @@ from app_functions import (
     get_retriever,
     get_encoding_model,
     get_reranker,
-    get_llm
+    get_llm,
 )
 from src.conversation import Conversation, Message
 from src.query import (
     CompletedQueryQueue,
     CompletedQuery,
     parse_llm_response,
-    query_rewrite_system_message
+    query_rewrite_system_message,
 )
 
 ## Page Configuration
@@ -40,11 +42,11 @@ st.set_page_config(
 )
 
 ## Constants
-collection_name = 'Huberman_minilm_256'
-turbo = 'gpt-3.5-turbo-0125'
-data_path = '../data/huberman_labs.json'
+collection_name = "Huberman_allminilm_256"
+turbo = "gpt-3.5-turbo-0125"
+data_path = "../data/huberman_labs.json"
 huberman_icon = "./app_assets/huberman_logo.png"
-uplimit_icon = './app_assets/uplimit_logo.jpg'
+uplimit_icon = "./app_assets/uplimit_logo.jpg"
 
 UI_CONVERSATION_KEY = "ui_conversation"
 LLM_CONTEXT_QUEUE = "llm_context_queue"
@@ -61,8 +63,9 @@ retriever_limit = 25
 ###################
 
 ## Get cached resouces
-reranker = None
-llm = None
+
+reranker = ReRanker(model_name="cross-encoder/ms-marco-MiniLM-L-6-v2")
+llm = LLM()
 encoding = None
 retriever = None
 
@@ -74,13 +77,14 @@ retriever = None
 ## Display fields
 LLM_CONTENT_FIELD = "content"  # could be expanded_content or content
 DSIPLAY_CONTENT_FIELD = "content"
-app_display_fields = retriever.return_properties 
+app_display_fields = retriever.return_properties
+
 
 # Run the chat interface within Streamlit
 def run_chat_interface():
     """
     Populates the chat area in the UI, sets the chat controls, and handles user input.
-    
+
     Args:
         None
 
@@ -104,7 +108,7 @@ def run_chat_interface():
         with st.chat_message("user", avatar=uplimit_icon):
             st.write(user_input)
         process_user_input(user_input)
-        # After processing user input, rerun the app. 
+        # After processing user input, rerun the app.
         st.rerun()
 
 
@@ -141,9 +145,11 @@ def set_new_conversations():
         Conversation: The newly created conversation object.
     """
     st.session_state[UI_CONVERSATION_KEY] = Conversation(
-            conversation_id=str(uuid.uuid4()),
-            system_message=Message(role="assistant", content="Welcome to the Huberman Lab podcast!"),
-        )
+        conversation_id=str(uuid.uuid4()),
+        system_message=Message(
+            role="assistant", content="Welcome to the Huberman Lab podcast!"
+        ),
+    )
     st.session_state[LLM_CONTEXT_QUEUE] = CompletedQueryQueue()
 
 
@@ -153,15 +159,16 @@ def process_user_input(user_input):
         # 1. Submit user input with previous chat history to LLM for possible rewrite if query is vague or ambiguous.
         context_queue = st.session_state[LLM_CONTEXT_QUEUE]
         query_rewrite_prompt = context_queue.generate_prompt(user_input)
-        llm_rewrite_response = llm.chat_completion( query_rewrite_system_message,
-                                                    user_message=query_rewrite_prompt,
-                                                    temperature=0.5,
-                                                    max_tokens=500)
+        llm_rewrite_response = llm.chat_completion(
+            query_rewrite_system_message,
+            user_message=query_rewrite_prompt,
+            temperature=0.5,
+            max_tokens=500,
+        )
         llm_rewrite_query_text = parse_llm_response(llm_rewrite_response)
-        
-        logger.info(f"Original Query: {user_input}") 
+
+        logger.info(f"Original Query: {user_input}")
         logger.info(f"Rewritten Query: {llm_rewrite_query_text}")
-        
 
         ###################
         # START CODE HERE #
@@ -178,11 +185,10 @@ def process_user_input(user_input):
 
         # 5. Generate context series
         context_series = generate_prompt_series(None, None, None, content_key=None)
-        
+
         ###################
         #  END CODE HERE  #
         ###################
-
 
         # 6. Add messages to conversations
         st.session_state[UI_CONVERSATION_KEY].add_message(
@@ -192,10 +198,7 @@ def process_user_input(user_input):
         # 7. Generate assistant response
         with st.chat_message(name="assistant", avatar=huberman_icon):
             gpt_answer = st.write_stream(
-                chat(
-                    user_message=context_series,
-                    max_tokens=1000
-                )
+                chat(user_message=context_series, max_tokens=1000)
             )
 
         # 8. Add assistant response to the conversation
@@ -207,7 +210,7 @@ def process_user_input(user_input):
         completed_query = CompletedQuery(
             user_query=user_input,
             llm_answer=gpt_answer,
-            llm_revised_query=llm_rewrite_query_text
+            llm_revised_query=llm_rewrite_query_text,
         )
         st.session_state[LLM_CONTEXT_QUEUE].add_query(completed_query)
 
@@ -215,17 +218,19 @@ def process_user_input(user_input):
 # Generate chat responses using the OpenAI API
 def chat(
     user_message: str,
-    max_tokens: int=250,
-    temperature: float=0.5,
- ) -> Generator[Any, Any, None]:
+    max_tokens: int = 250,
+    temperature: float = 0.5,
+) -> Generator[Any, Any, None]:
     """Generate chat responses using an LLM API.
     Stream response out to UI.
     """
-    completion = llm.chat_completion(huberman_system_message,
-                                     user_message=user_message,
-                                     temperature=temperature,
-                                     max_tokens=max_tokens,
-                                     stream=True)
+    completion = llm.chat_completion(
+        huberman_system_message,
+        user_message=user_message,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        stream=True,
+    )
 
     full_json = []
     for chunk in completion:
@@ -239,6 +244,7 @@ def chat(
     answer = "".join(full_json)
     # logger.info(answer)
     st.session_state[MESSAGE_BUILDER_KEY] = {"role": "assistant", "content": answer}
+
 
 # Main function to run the Streamlit app
 def main():
@@ -257,6 +263,7 @@ def main():
         st.session_state.streaming = False
 
     run_chat_interface()
+
 
 if __name__ == "__main__":
     main()
